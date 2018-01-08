@@ -1,0 +1,153 @@
+#!/bin/bash
+
+set -e
+
+#######################################################
+# Edit this to set your default configuration directory
+CONFIGDIR=~/.config/colonize
+
+#######################################################
+# No need to configure anything past this point.
+
+CONFIGFILE=${CONFIGDIR}/config
+COLONIES=${CONFIGDIR}/colonies
+ARTIFACTS=${CONFIGDIR}/artifacts
+
+function rand_name {
+    LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8 | xargs
+}
+
+function render_template() {
+    DCOS_CLUSTER_NAME=${2}
+
+    eval "cat <<EOF
+$(cat "$1")
+"
+}
+
+function setup_dcos {
+    colony="${1}"
+    ip="${2}"
+    dcos="${3:-open)}"
+
+    if [ "${dcos}" == "open" ]; then
+        payload=('{"token":"'"${OPEN_DCOS_TOKEN}"'"}')
+    elif [ "${dcos}" == "ee" ]; then
+        payload=('{"username":"bootstrapuser","password":"deleteme"}')
+    fi
+
+    token=$(curl -s -k -L -H "Content-type: json" -d ${payload} https://${ip}/acs/api/v1/auth/login | jq -r '.token')
+
+    auth="Authorization: token="${token}
+    cluster_id=$(curl -s -k -L -H "${auth}" https://${ip}/metadata | jq -r '.CLUSTER_ID')
+
+    mkdir -p ~/.dcos/clusters/${cluster_id}
+    cat > ~/.dcos/clusters/${cluster_id}/dcos.toml <<EOF
+[core]
+dcos_url = "https://${ip}"
+dcos_acs_token = "${token}"
+ssl_verify = "false"
+
+[cluster]
+name = "${colony}"
+EOF
+    chmod 0600 ~/.dcos/clusters/${cluster_id}/dcos.toml
+
+    dcos cluster attach ${colony}
+}
+
+function colonize {
+    cloudprovider=${1}
+    colony_name=${2}
+    dcos=${3:-open}
+
+    colony=sreis-${cloudprovider}-${colony_name}
+
+    mkdir -p ${COLONIES}/${colony}
+
+    render_template ${ARTIFACTS}/desired_cluster_profile.${cloudprovider} ${colony} > ${COLONIES}/${colony}/desired_cluster_profile
+
+    pushd ${COLONIES}/${colony} > /dev/null
+
+    terraform init -from-module github.com/dcos/terraform-dcos/${cloudprovider};
+    terraform apply -var-file desired_cluster_profile;
+
+    ip=$(terraform output -state=terraform.tfstate "Mesos Master Public IP")
+    setup_dcos ${colony} ${ip} ${dcos}
+
+    popd > /dev/null
+}
+
+ function destroy {
+    colony=$1
+
+    dcos cluster remove ${colony}
+
+    pushd ${COLONIES}/${colony} > /dev/null
+
+    terraform destroy -var-file desired_cluster_profile
+
+    popd > /dev/null
+
+    rm -rf ${COLONIES}/${colony}
+}
+
+if [ ! -d ${CONFIGDIR} ]; then
+    mkdir -p ${CONFIGDIR}
+    cat > ${CONFIGFILE} << EOF
+OPEN_DCOS_TOKEN=
+GOOGLE_PROJECT=
+GCP_PUB_KEY_FILE=
+
+EOF
+
+    mkdir -p ${CONFIGDIR}/artifacts
+    cp artifacts/desired_cluster_profile.* ${CONFIGDIR}/artifacts
+
+    echo "First time running! Open and edit default configuration file "${CONFIGFILE}
+    exit 0
+fi
+
+source ${CONFIGFILE}
+
+([ -z ${OPEN_DCOS_TOKEN+x} ] || [ -z ${GOOGLE_PROJECT+x} ] || [ -z ${GCP_PUB_KEY_FILE+x} ]) && (echo "Invalid configuration file." ; exit 1)
+
+case $1 in
+gcp|aws|azure)
+    dcos=${2:-open}
+    if [ ! "${dcos}" = "open" ]; then
+        echo "Invalid dcos mode. mode="${dcos}
+        exit 1
+    fi
+    colonize $1 $(rand_name)
+    ;;
+list)
+    if [ -d ${COLONIES} ]; then
+        for colony in `ls ${COLONIES}` ;
+        do
+            ip=`terraform output -state=${COLONIES}/${colony}/terraform.tfstate "Mesos Master Public IP"`
+            echo ${colony} master_ip=${ip}
+        done
+    fi
+    ;;
+destroy)
+    colony=${2}
+
+    if [ ! -d ${COLONIES}/${colony} ]; then
+        echo "error: colony not found. colony="${colony}
+        exit 1
+    fi
+
+    destroy ${colony}
+    ;;
+setup_dcos)
+    colony=${2}
+    ip=${3}
+    dcos=${4:-open}
+
+    setup_dcos ${colony} ${ip} ${dcos}
+    ;;
+*)
+    echo "Invalid command."
+    ;;
+esac
