@@ -143,6 +143,12 @@ destroy)
     fi
 
     destroy ${colony}
+tunnel)
+    colony="${2}"
+    ip=$(colony_master_ip "${colony}")
+    ssh -4 -f -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" -o "ServerAliveInterval=120" \
+		-N -L 9000:apiserver-insecure.kubernetes.l4lb.thisdcos.directory:9000 \
+		core@"${ip}"
     ;;
 dcos)
     colony=${2}
