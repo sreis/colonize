@@ -56,6 +56,11 @@ EOF
     dcos cluster attach ${colony}
 }
 
+function colony_master_ip {
+    local colony="${1}"
+    terraform output -state=${COLONIES}/${colony}/terraform.tfstate "Mesos Master Public IP"
+}
+
 function colonize {
     cloudprovider=${1}
     colony_name=${2}
@@ -72,7 +77,7 @@ function colonize {
     terraform init -from-module github.com/dcos/terraform-dcos/${cloudprovider};
     terraform apply -var-file desired_cluster_profile;
 
-    ip=$(terraform output -state=terraform.tfstate "Mesos Master Public IP")
+    local ip=$(colony_master_ip "${colony}")
     setup_dcos ${colony} ${ip} ${dcos}
 
     popd > /dev/null
@@ -125,8 +130,7 @@ list)
     if [ -d ${COLONIES} ]; then
         for colony in `ls ${COLONIES}` ;
         do
-            ip=`terraform output -state=${COLONIES}/${colony}/terraform.tfstate "Mesos Master Public IP"`
-            echo ${colony} master_ip=${ip}
+            echo ${colony} master_ip=$(colony_master_ip "${colony}")
         done
     fi
     ;;
@@ -140,12 +144,13 @@ destroy)
 
     destroy ${colony}
     ;;
-setup_dcos)
+dcos)
     colony=${2}
-    ip=${3}
-    dcos=${4:-open}
+    dcos=${3:-open}
 
-    setup_dcos ${colony} ${ip} ${dcos}
+    ip=$(colony_master_ip "${colony}")
+
+    setup_dcos "${colony}" "${ip}" "${dcos}"
     ;;
 *)
     echo "Invalid command."
