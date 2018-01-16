@@ -18,7 +18,7 @@ function rand_name {
 }
 
 function render_template() {
-    DCOS_CLUSTER_NAME=${2}
+    export DCOS_CLUSTER_NAME=${2}
 
     eval "cat <<EOF
 $(cat "$1")
@@ -36,13 +36,13 @@ function setup_dcos {
         payload=('{"username":"bootstrapuser","password":"deleteme"}')
     fi
 
-    local token=$(curl -s -k -L -H "Content-type: json" -d ${payload} https://${ip}/acs/api/v1/auth/login | jq -r '.token')
+    token=$(curl -s -k -L -H "Content-type: json" -d "${payload[@]}" https://"${ip}"/acs/api/v1/auth/login | jq -r '.token')
 
-    local auth="Authorization: token="${token}
-    local cluster_id=$(curl -s -k -L -H "${auth}" https://${ip}/metadata | jq -r '.CLUSTER_ID')
+    auth="Authorization: token="${token}
+    cluster_id=$(curl -s -k -L -H "${auth}" https://"${ip}"/metadata | jq -r '.CLUSTER_ID')
 
-    mkdir -p ~/.dcos/clusters/${cluster_id}
-    cat > ~/.dcos/clusters/${cluster_id}/dcos.toml <<EOF
+    mkdir -p ~/.dcos/clusters/"${cluster_id}"
+    cat > ~/.dcos/clusters/"${cluster_id}"/dcos.toml <<EOF
 [core]
 dcos_url = "https://${ip}"
 dcos_acs_token = "${token}"
@@ -51,34 +51,34 @@ ssl_verify = "false"
 [cluster]
 name = "${colony}"
 EOF
-    chmod 0600 ~/.dcos/clusters/${cluster_id}/dcos.toml
+    chmod 0600 ~/.dcos/clusters/"${cluster_id}"/dcos.toml
 
-    dcos cluster attach ${colony}
+    dcos cluster attach "${colony}"
 }
 
 function colony_master_ip {
-    local colony="${1}"
-    terraform output -state=${COLONIES}/${colony}/terraform.tfstate "Mesos Master Public IP"
+    colony="${1}"
+    terraform output -state="${COLONIES}"/"${colony}"/terraform.tfstate "Mesos Master Public IP"
 }
 
 function colonize {
-    cloudprovider=${1}
-    colony_name=${2}
-    dcos=${3:-open}
+    cloudprovider="${1}"
+    colony_name="${2}"
+    dcos="${3:-open}"
 
-    local colony=sreis-${cloudprovider}-${colony_name}
+    colony=sreis-"${cloudprovider}"-"${colony_name}"
 
-    mkdir -p ${COLONIES}/${colony}
+    mkdir -p "${COLONIES}"/"${colony}"
 
-    render_template ${ARTIFACTS}/desired_cluster_profile.${cloudprovider} ${colony} > ${COLONIES}/${colony}/desired_cluster_profile
+    render_template "${ARTIFACTS}"/desired_cluster_profile."${cloudprovider}" "${colony}" > "${COLONIES}"/"${colony}"/desired_cluster_profile
 
-    pushd ${COLONIES}/${colony} > /dev/null
+    pushd "${COLONIES}"/"${colony}" > /dev/null
 
-    terraform init -from-module github.com/dcos/terraform-dcos/${cloudprovider};
+    terraform init -from-module github.com/dcos/terraform-dcos/"${cloudprovider}";
     terraform apply -var-file desired_cluster_profile;
 
-    local ip=$(colony_master_ip "${colony}")
-    setup_dcos ${colony} ${ip} ${dcos}
+    ip=$(colony_master_ip "${colony}")
+    setup_dcos "${colony}" "${ip}" "${dcos}"
 
     popd > /dev/null
 }
@@ -86,18 +86,19 @@ function colonize {
 function get_dcos_colony {
     dcos cluster list | awk '/\*/ { print substr($1,1,length($1)-1) }'
 }
+
  function destroy {
-    colony=$1
+    colony="${1}"
 
-    dcos cluster remove ${colony}
+    dcos cluster remove "${colony}"
 
-    pushd ${COLONIES}/${colony} > /dev/null
+    pushd "${COLONIES}"/"${colony}" > /dev/null
 
     terraform destroy -var-file desired_cluster_profile
 
     popd > /dev/null
 
-    rm -rf ${COLONIES}/${colony}
+    rm -rf "${COLONIES:?}"/"${colony:?}"
 }
 
 if [ ! -d ${CONFIGDIR} ]; then
@@ -116,32 +117,38 @@ EOF
     exit 0
 fi
 
+# shellcheck source=/dev/null
 source ${CONFIGFILE}
 
 ([ -z ${OPEN_DCOS_TOKEN+x} ] || [ -z ${GOOGLE_PROJECT+x} ] || [ -z ${GCP_PUB_KEY_FILE+x} ]) && (echo "Invalid configuration file." ; exit 1)
 
 case $1 in
 gcp|aws|azure)
-    dcos=${2:-open}
+    cloudprovider="${1}"
+    dcos="${2:-open}"
     if [ ! "${dcos}" = "open" ]; then
-        echo "Invalid dcos mode. mode="${dcos}
+        echo Invalid dcos mode. mode="${dcos}"
         exit 1
     fi
-    colonize $1 $(rand_name)
+    colony_name=$(rand_name)
+    colonize "${cloudprovider}" "${colony_name}"
     ;;
 list)
-    if [ -d ${COLONIES} ]; then
-        for colony in `ls ${COLONIES}` ;
+    if [ -d "${COLONIES}" ]; then
+        for path in "${COLONIES}"/* ;
         do
-            echo ${colony} master_ip=$(colony_master_ip "${colony}")
+            [[ -d "${path}" ]] || break
+            colony=$(basename "${path}")
+            master_ip=$(colony_master_ip "${colony}")
+            echo "${colony}" master_ip="${master_ip}"
         done
     fi
     ;;
 destroy)
     colony="${2}"
 
-    if [ ! -d ${COLONIES}/${colony} ]; then
-        echo "error: colony not found. colony=""${colony}"
+    if [ ! -d "${COLONIES}"/"${colony}" ]; then
+        echo error: colony not found. colony="${colony}"
         exit 1
     fi
 
