@@ -83,6 +83,9 @@ function colonize {
     popd > /dev/null
 }
 
+function get_dcos_colony {
+    dcos cluster list | awk '/\*/ { print substr($1,1,length($1)-1) }'
+}
  function destroy {
     colony=$1
 
@@ -146,6 +149,9 @@ destroy)
     ;;
 tunnel)
     colony="${2}"
+    if [ ! -z ${colony+x} ]; then
+        colony=$(get_dcos_colony)
+    fi
     ip=$(colony_master_ip "${colony}")
     ssh -4 -f -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" -o "ServerAliveInterval=120" \
 		-N -L 9000:apiserver-insecure.kubernetes.l4lb.thisdcos.directory:9000 \
