@@ -22,10 +22,14 @@ Edit file `${CONFIGDIR}/config` to setup your GCP credentials.
 
 ``` colonize gcp ```
 
-### List Terraform deployment 
+### List Terraform deployments 
 
 ``` colonize list ```
 
 ### Destroy Terraform deployment
 
-``` colonize destroy <id> ```
+``` colonize destroy <colony id> ```
+
+### Create SSH to Kubernetes API server running on DC/OS
+
+``` colonize tunnel [<colony id>] ```
