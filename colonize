@@ -90,7 +90,7 @@ function get_dcos_colony {
  function destroy {
     colony="${1}"
 
-    dcos cluster remove "${colony}"
+    dcos cluster remove "${colony}" || true
 
     pushd "${COLONIES}"/"${colony}" > /dev/null
 
